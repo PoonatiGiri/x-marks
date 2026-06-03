@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   Background,
@@ -37,6 +37,15 @@ const COLS = 8
 
 type AnyItem = Bookmark | RedditSave
 
+// Deterministic jitter from item id — so positions stay stable across filter changes
+function stableHash(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(31, h) + s.charCodeAt(i) | 0
+  }
+  return h >>> 0 // unsigned
+}
+
 function buildNodes(
   items: AnyItem[],
   onClickComments: (post: RedditSave) => void,
@@ -45,8 +54,9 @@ function buildNodes(
   return items.map((item, i) => {
     const col = i % COLS
     const row = Math.floor(i / COLS)
-    const jitterX = (Math.random() - 0.5) * 60
-    const jitterY = (Math.random() - 0.5) * 40
+    const h = stableHash(item.id)
+    const jitterX = ((h & 0xFF) / 255 - 0.5) * 60
+    const jitterY = (((h >> 8) & 0xFF) / 255 - 0.5) * 40
 
     const isReddit = (item as RedditSave).source === "reddit"
 
@@ -65,10 +75,33 @@ function buildNodes(
   })
 }
 
+function searchItems(items: AnyItem[], query: string): AnyItem[] {
+  if (!query.trim()) return items
+  const q = query.toLowerCase()
+  return items.filter((item) => {
+    if ((item as RedditSave).source === "reddit") {
+      const r = item as RedditSave
+      return (
+        r.title.toLowerCase().includes(q) ||
+        r.subreddit.toLowerCase().includes(q) ||
+        r.author.toLowerCase().includes(q) ||
+        r.body?.toLowerCase().includes(q)
+      )
+    }
+    const b = item as Bookmark
+    return (
+      b.text.toLowerCase().includes(q) ||
+      b.author_name.toLowerCase().includes(q) ||
+      b.author_username.toLowerCase().includes(q)
+    )
+  })
+}
+
 function Canvas({
   items, twitterCount, redditCount,
   onSync, syncing, filter, onFilterChange, redditConnected, onManageReddit,
   onClickComments, onClickArticle,
+  searchQuery, onSearchChange,
 }: {
   items: AnyItem[]
   twitterCount: number
@@ -81,18 +114,59 @@ function Canvas({
   onManageReddit: () => void
   onClickComments: (post: RedditSave) => void
   onClickArticle: (url: string, title: string) => void
+  searchQuery: string
+  onSearchChange: (q: string) => void
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
   const [edges, , onEdgesChange] = useEdgesState([])
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setNodes(items.length > 0 ? buildNodes(items, onClickComments, onClickArticle) : [])
   }, [items, setNodes, onClickComments, onClickArticle])
 
+  // Cmd/Ctrl+K to focus search
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   return (
     <div className="w-full h-full relative">
       {/* Toolbar */}
-      <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+      <div className="absolute top-4 left-4 right-4 z-10 flex items-center gap-2">
+
+        {/* Search bar */}
+        <div className="relative flex-1 max-w-xs">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-300 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35" strokeLinecap="round"/>
+          </svg>
+          <input
+            ref={searchRef}
+            type="text"
+            placeholder="Search…"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="w-full pl-8 pr-8 py-2 text-xs bg-white border border-gray-100 rounded-xl shadow-sm placeholder-gray-300 text-gray-800 focus:outline-none focus:border-gray-300 focus:ring-0"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* Source filter */}
         <div className="flex items-center bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden text-xs">
@@ -137,7 +211,7 @@ function Canvas({
         <button
           onClick={onSync}
           disabled={syncing}
-          className="bg-black text-white text-xs font-medium px-4 py-2 rounded-xl hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
+          className="bg-black text-white text-xs font-medium px-4 py-2 rounded-xl hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm shrink-0"
         >
           {syncing ? (
             <>
@@ -158,6 +232,13 @@ function Canvas({
           )}
         </button>
       </div>
+
+      {/* Empty search result */}
+      {items.length === 0 && searchQuery && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <p className="text-sm text-gray-400">No results for "<span className="font-medium">{searchQuery}</span>"</p>
+        </div>
+      )}
 
       <ReactFlow
         nodes={nodes}
@@ -190,10 +271,23 @@ export function BookmarkCanvas() {
   const [showManageReddit, setShowManageReddit] = useState(false)
   const [upvotesPrivate, setUpvotesPrivate] = useState(false)
   const [filter, setFilter] = useState<SourceFilter>("all")
+  const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [panel, setPanel] = useState<PanelState>(null)
+
+  // ESC closes any open panel or clears search
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (panel) { setPanel(null); return }
+        if (searchQuery) { setSearchQuery(""); return }
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [panel, searchQuery])
 
   const loadRedditFeed = useCallback(async (prefs: RedditPreferences) => {
     if (prefs.subreddits.length === 0 && !prefs.includeUpvoted) return
@@ -265,11 +359,17 @@ export function BookmarkCanvas() {
     loadAll()
   }, [loadAll])
 
-  const filteredItems: AnyItem[] = filter === "all"
+  const sourceItems: AnyItem[] = filter === "all"
     ? [...bookmarks, ...redditPosts]
     : filter === "twitter"
     ? bookmarks
     : redditPosts
+
+  const filteredItems = useMemo(
+    () => searchItems(sourceItems, searchQuery),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bookmarks, redditPosts, filter, searchQuery]
+  )
 
   if (loading) {
     return (
@@ -309,6 +409,8 @@ export function BookmarkCanvas() {
           onManageReddit={() => setShowManageReddit(true)}
           onClickComments={handleClickComments}
           onClickArticle={handleClickArticle}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
         />
 
         {/* Side panels */}
