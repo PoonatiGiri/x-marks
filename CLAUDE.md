@@ -122,11 +122,45 @@ types/
 - `defaultViewport={{ x: 60, y: 60, zoom: 0.55 }}` — no fitView (fitView would zoom out to 0.05x and everything looks like a photo collage)
 - Nodes are keyed by bookmark/post ID — React Flow deduplicates by ID
 
-### Auth Architecture (multi-platform, no Supabase yet)
-- **X:** Primary identity via NextAuth. Session managed by NextAuth JWT.
-- **Reddit:** Secondary account. Custom OAuth flow. Tokens in separate cookie.
-- **Problem deferred:** If user signs in with Reddit first (as primary), can't link to X account without Supabase. Currently X must be the first login.
-- **Planned fix:** Supabase + NextAuth adapter will allow proper account linking.
+### Auth Architecture (current state)
+
+**X (primary identity)**
+- Handled by NextAuth v5 with JWT strategy
+- `lib/auth.ts` has `DB_AVAILABLE` check — if `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set, NextAuth uses Supabase adapter to persist user/account records. Without them, pure JWT (no DB).
+- Access token (2hr) + refresh token stored in JWT. Auto-refreshed in `jwt` callback.
+
+**Reddit (secondary account)**
+- Custom OAuth flow, independent of NextAuth
+- Tokens stored in HTTP-only cookie `reddit_session` encrypted with `NEXTAUTH_SECRET` via `next-auth/jwt` encode/decode
+- Reddit can now be connected **before OR after** X sign-in:
+  - If X session exists when Reddit callback fires → redirect to `/canvas?reddit=connected`
+  - If no X session → redirect to `/?reddit=connected` (landing page, user signs in with X next)
+- `app/api/reddit/connect/route.ts` no longer requires an active X session
+
+**Supabase groundwork (partially added)**
+- `DB_AVAILABLE = !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)` — feature-flagged throughout
+- `lib/auth.ts` will use Supabase adapter when DB is available
+- `app/api/reddit/feed/route.ts` will persist Reddit saves to DB when available
+- `lib/db.ts` expected (not confirmed built) — should expose `getUserIdByTwitterId()`, `upsertRedditSaves()`, `setSyncState()`
+- **Supabase env vars not yet set** — currently running in no-DB mode
+
+---
+
+### OAuth Edge Case: Duplicate Accounts
+
+**The problem:** User signs in with X → has account. Later accidentally clicks "Sign in with Reddit" on landing page instead of "Connect Reddit" from canvas → creates a second separate account.
+
+**Three options discussed:**
+1. Email-based auto-link — unreliable (Reddit/X often don't expose email)
+2. "Is this a new account?" prompt after OAuth — catches most cases
+3. "Link accounts" in Settings — self-serve merge for anyone who slips through
+
+**Decision:** Build options 2 + 3 together when Supabase is added. For now:
+- Make "Connect Reddit" CTA prominent enough in canvas that users never feel the need to sign out and re-sign-in
+- If duplicate account is created: manually merge in Supabase (quick at small scale)
+- The landing page shows both "Continue with X" and "Continue with Reddit" — copy should guide returning users to use their original provider
+
+**Status:** Deferred until Supabase. Low risk at current scale.
 
 ---
 

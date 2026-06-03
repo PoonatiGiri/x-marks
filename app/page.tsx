@@ -1,6 +1,7 @@
 import { auth, signIn } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
+import { MarqueeBackground } from "@/components/landing/MarqueeBackground"
 
 async function isRedditConnected() {
   const cookieStore = await cookies()
@@ -20,8 +21,9 @@ export default async function Home({
   const redditConnected = await isRedditConnected()
 
   return (
-    <main className="min-h-screen bg-white flex flex-col items-center justify-center px-4">
-      <div className="max-w-lg w-full text-center">
+    <main className="relative min-h-screen bg-white flex flex-col items-center justify-center px-4">
+      <MarqueeBackground />
+      <div className="relative z-10 max-w-lg w-full text-center">
 
         {/* Logo */}
         <div className="inline-flex items-center gap-2 mb-8">
