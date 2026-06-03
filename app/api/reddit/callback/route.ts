@@ -4,27 +4,30 @@ import { exchangeCodeForTokens } from "@/lib/reddit"
 import { setRedditSession } from "@/lib/reddit-session"
 
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.redirect(new URL("/", req.url))
-  }
-
   const { searchParams } = new URL(req.url)
   const code = searchParams.get("code")
   const state = searchParams.get("state")
   const error = searchParams.get("error")
 
+  const session = await auth()
+  const hasXSession = !!session
+
+  // Reddit denied access
   if (error === "access_denied") {
-    return NextResponse.redirect(new URL("/canvas?reddit=denied", req.url))
+    const dest = hasXSession ? "/canvas?reddit=denied" : "/?reddit=denied"
+    return NextResponse.redirect(new URL(dest, req.url))
   }
 
+  // CSRF check
   const storedState = req.cookies.get("reddit_oauth_state")?.value
   if (!state || state !== storedState) {
-    return NextResponse.redirect(new URL("/canvas?reddit=error", req.url))
+    const dest = hasXSession ? "/canvas?reddit=error" : "/?reddit=error"
+    return NextResponse.redirect(new URL(dest, req.url))
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL("/canvas?reddit=error", req.url))
+    const dest = hasXSession ? "/canvas?reddit=error" : "/?reddit=error"
+    return NextResponse.redirect(new URL(dest, req.url))
   }
 
   try {
@@ -34,12 +37,14 @@ export async function GET(req: NextRequest) {
     )
     await setRedditSession(tokens)
 
-    const response = NextResponse.redirect(
-      new URL("/canvas?reddit=connected", req.url)
-    )
+    // If user already has X session → go straight to canvas
+    // If not → go back to landing page; Reddit cookie is set, X sign-in comes next
+    const dest = hasXSession ? "/canvas?reddit=connected" : "/?reddit=connected"
+    const response = NextResponse.redirect(new URL(dest, req.url))
     response.cookies.delete("reddit_oauth_state")
     return response
   } catch {
-    return NextResponse.redirect(new URL("/canvas?reddit=error", req.url))
+    const dest = hasXSession ? "/canvas?reddit=error" : "/?reddit=error"
+    return NextResponse.redirect(new URL(dest, req.url))
   }
 }

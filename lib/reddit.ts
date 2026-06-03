@@ -175,7 +175,10 @@ export async function fetchSubscribedSubreddits(
       { headers: { Authorization: `bearer ${accessToken}`, "User-Agent": USER_AGENT } }
     )
 
-    if (!res.ok) break
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.message ?? `Reddit API error: ${res.status}`)
+    }
 
     const data = await res.json()
     for (const child of data?.data?.children ?? []) {

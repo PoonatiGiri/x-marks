@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/lib/auth"
 
 export async function GET() {
-  const session = await auth()
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
+  // No X session required — Reddit can be connected before or after X sign-in.
+  // After OAuth, if no X session, callback redirects back to landing page.
   const state = crypto.randomUUID()
   const params = new URLSearchParams({
     client_id: process.env.REDDIT_CLIENT_ID!,

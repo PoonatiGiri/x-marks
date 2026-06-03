@@ -34,16 +34,18 @@ export function RedditSetup({ onDone, onClose, isEditing = false }: {
   const [includeUpvoted, setIncludeUpvoted] = useState(existing?.includeUpvoted ?? false)
   const [timeframe, setTimeframe] = useState<"week" | "month">(existing?.timeframe ?? "week")
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
 
   useEffect(() => {
     fetch("/api/reddit/subreddits")
-      .then((r) => r.json())
-      .then((d) => {
+      .then(async (r) => {
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error ?? `Error ${r.status}`)
         setSubreddits(d.subreddits ?? [])
-        setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((e) => setFetchError(e.message ?? "Failed to load communities"))
+      .finally(() => setLoading(false))
   }, [])
 
   const toggle = (name: string) => {
@@ -152,8 +154,20 @@ export function RedditSetup({ onDone, onClose, isEditing = false }: {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
             </div>
+          ) : fetchError ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <p className="text-xs text-red-400 max-w-xs">{fetchError}</p>
+              <a
+                href="/api/reddit/connect"
+                className="text-xs text-orange-500 underline underline-offset-2 hover:text-orange-600"
+              >
+                Reconnect Reddit →
+              </a>
+            </div>
           ) : filtered.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No communities found</p>
+            <p className="text-sm text-gray-400 text-center py-8">
+              {search ? `No results for "${search}"` : "No communities found"}
+            </p>
           ) : (
             filtered.map((s) => (
               <button
