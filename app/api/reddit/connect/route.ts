@@ -14,7 +14,7 @@ export async function GET() {
     state,
     redirect_uri: `${process.env.NEXTAUTH_URL}/api/reddit/callback`,
     duration: "permanent",
-    scope: "identity history",
+    scope: "identity history mysubreddits read",
   })
 
   const response = NextResponse.redirect(

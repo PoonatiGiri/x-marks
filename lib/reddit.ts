@@ -12,8 +12,15 @@ export interface RedditSave {
   is_self: boolean
   previewImage?: string
   type: "post" | "comment"
-  comment_body?: string
-  post_title?: string
+  contentType: "saved" | "upvoted" | "subreddit_top"
+}
+
+export interface SubredditInfo {
+  name: string          // e.g. "indiehackers"
+  display_name: string  // e.g. "r/indiehackers"
+  title: string
+  subscribers: number
+  icon?: string
 }
 
 export interface RedditTokens {
@@ -97,6 +104,29 @@ export async function refreshRedditTokens(
   }
 }
 
+function parsePost(p: any, contentType: RedditSave["contentType"]): RedditSave {
+  const preview =
+    p.preview?.images?.[0]?.resolutions?.slice(-1)?.[0]?.url?.replace(/&amp;/g, "&") ??
+    (p.thumbnail?.startsWith("http") ? p.thumbnail : undefined)
+
+  return {
+    source: "reddit",
+    id: p.name,
+    title: p.title,
+    body: p.selftext || undefined,
+    url: p.url,
+    subreddit: p.subreddit,
+    author: p.author,
+    score: p.score,
+    created_utc: p.created_utc,
+    permalink: `https://reddit.com${p.permalink}`,
+    is_self: p.is_self,
+    previewImage: preview,
+    type: "post",
+    contentType,
+  }
+}
+
 export async function fetchRedditSaved(
   accessToken: string,
   username: string
@@ -110,12 +140,7 @@ export async function fetchRedditSaved(
 
     const res = await fetch(
       `https://oauth.reddit.com/user/${username}/saved?${params}`,
-      {
-        headers: {
-          Authorization: `bearer ${accessToken}`,
-          "User-Agent": USER_AGENT,
-        },
-      }
+      { headers: { Authorization: `bearer ${accessToken}`, "User-Agent": USER_AGENT } }
     )
 
     if (!res.ok) {
@@ -124,34 +149,8 @@ export async function fetchRedditSaved(
     }
 
     const data = await res.json()
-    const children = data?.data?.children ?? []
-
-    for (const child of children) {
-      const p = child.data
-      if (child.kind === "t3") {
-        // Post
-        const preview =
-          p.preview?.images?.[0]?.resolutions?.slice(-1)?.[0]?.url?.replace(
-            /&amp;/g,
-            "&"
-          ) ?? (p.thumbnail?.startsWith("http") ? p.thumbnail : undefined)
-
-        saves.push({
-          source: "reddit",
-          id: p.name,
-          title: p.title,
-          body: p.selftext || undefined,
-          url: p.url,
-          subreddit: p.subreddit,
-          author: p.author,
-          score: p.score,
-          created_utc: p.created_utc,
-          permalink: `https://reddit.com${p.permalink}`,
-          is_self: p.is_self,
-          previewImage: preview,
-          type: "post",
-        })
-      }
+    for (const child of data?.data?.children ?? []) {
+      if (child.kind === "t3") saves.push(parsePost(child.data, "saved"))
     }
 
     after = data?.data?.after ?? null
@@ -159,4 +158,95 @@ export async function fetchRedditSaved(
   } while (after)
 
   return saves
+}
+
+export async function fetchSubscribedSubreddits(
+  accessToken: string
+): Promise<SubredditInfo[]> {
+  const subs: SubredditInfo[] = []
+  let after: string | null = null
+
+  do {
+    const params = new URLSearchParams({ limit: "100" })
+    if (after) params.set("after", after)
+
+    const res = await fetch(
+      `https://oauth.reddit.com/subreddits/mine/subscriber?${params}`,
+      { headers: { Authorization: `bearer ${accessToken}`, "User-Agent": USER_AGENT } }
+    )
+
+    if (!res.ok) break
+
+    const data = await res.json()
+    for (const child of data?.data?.children ?? []) {
+      const s = child.data
+      subs.push({
+        name: s.display_name,
+        display_name: `r/${s.display_name}`,
+        title: s.title,
+        subscribers: s.subscribers,
+        icon: s.icon_img || s.community_icon?.split("?")?.[0] || undefined,
+      })
+    }
+
+    after = data?.data?.after ?? null
+  } while (after && subs.length < 200)
+
+  return subs.sort((a, b) => b.subscribers - a.subscribers)
+}
+
+export async function fetchSubredditTopPosts(
+  accessToken: string,
+  subreddit: string,
+  timeframe: "week" | "month" = "week",
+  limit = 25
+): Promise<RedditSave[]> {
+  // Use OAuth endpoint — public .json API is blocked server-side by Cloudflare
+  const res = await fetch(
+    `https://oauth.reddit.com/r/${subreddit}/top?t=${timeframe}&limit=${limit}`,
+    {
+      headers: {
+        Authorization: `bearer ${accessToken}`,
+        "User-Agent": USER_AGENT,
+      },
+    }
+  )
+
+  if (!res.ok) {
+    console.error(`[Reddit] r/${subreddit}: HTTP ${res.status}`)
+    return []
+  }
+
+  const data = await res.json()
+  const posts = (data?.data?.children ?? [])
+    .filter((c: any) => c.kind === "t3")
+    .map((c: any) => parsePost(c.data, "subreddit_top"))
+
+  console.log(`[Reddit] r/${subreddit}: ${posts.length} posts`)
+  return posts
+}
+
+export async function fetchUpvotedPosts(
+  accessToken: string,
+  username: string
+): Promise<{ posts: RedditSave[]; isPrivate: boolean }> {
+  const res = await fetch(
+    `https://oauth.reddit.com/user/${username}/upvoted?limit=100&type=links`,
+    { headers: { Authorization: `bearer ${accessToken}`, "User-Agent": USER_AGENT } }
+  )
+
+  if (!res.ok) return { posts: [], isPrivate: true }
+
+  const data = await res.json()
+  const children = data?.data?.children ?? []
+
+  // Reddit returns empty array (not an error) when vote history is private
+  if (children.length === 0) return { posts: [], isPrivate: true }
+
+  return {
+    posts: children
+      .filter((c: any) => c.kind === "t3")
+      .map((c: any) => parsePost(c.data, "upvoted")),
+    isPrivate: false,
+  }
 }

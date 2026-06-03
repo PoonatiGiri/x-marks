@@ -13,6 +13,7 @@ export interface Bookmark {
     bookmark_count: number
   }
   expanded_url?: string
+  is_thread?: boolean
   media?: Array<{
     type: "photo" | "video" | "animated_gif"
     url?: string
@@ -23,14 +24,16 @@ export interface Bookmark {
 export async function fetchAllBookmarks(
   accessToken: string,
   userId: string
-): Promise<Bookmark[]> {
+): Promise<{ bookmarks: Bookmark[]; pages: number; apiTotal: number }> {
   const bookmarks: Bookmark[] = []
   let nextToken: string | undefined
+  let pages = 0
+  let apiTotal = 0
 
   do {
     const params = new URLSearchParams({
       max_results: "100",
-      "tweet.fields": "created_at,public_metrics,author_id,entities,attachments",
+      "tweet.fields": "created_at,public_metrics,author_id,entities,attachments,conversation_id,in_reply_to_user_id",
       expansions: "author_id,attachments.media_keys",
       "user.fields": "name,username,profile_image_url",
       "media.fields": "url,preview_image_url,type",
@@ -49,6 +52,8 @@ export async function fetchAllBookmarks(
     }
 
     const data = await res.json()
+    pages++
+    apiTotal += data.meta?.result_count ?? 0
 
     if (data.data?.length) {
       const usersMap: Record<string, any> = Object.fromEntries(
@@ -83,6 +88,7 @@ export async function fetchAllBookmarks(
           created_at: tweet.created_at,
           public_metrics: tweet.public_metrics,
           expanded_url: firstUrl,
+          is_thread: tweet.in_reply_to_user_id === tweet.author_id,
           media: media.length ? media : undefined,
         })
       }
@@ -94,5 +100,5 @@ export async function fetchAllBookmarks(
     if (bookmarks.length >= 500) break
   } while (nextToken)
 
-  return bookmarks
+  return { bookmarks, pages, apiTotal }
 }

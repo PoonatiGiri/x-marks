@@ -15,22 +15,33 @@ import {
 import "@xyflow/react/dist/style.css"
 import { BookmarkNode } from "./BookmarkNode"
 import { RedditNode } from "./RedditNode"
+import { RedditSetup, loadRedditPrefs, type RedditPreferences } from "./RedditSetup"
+import { CommentsPanel } from "./CommentsPanel"
+import { ArticlePanel } from "./ArticlePanel"
 import type { Bookmark } from "@/lib/twitter"
 import type { RedditSave } from "@/lib/reddit"
 
 type SourceFilter = "all" | "twitter" | "reddit"
+type PanelState =
+  | { type: "comments"; post: RedditSave }
+  | { type: "article"; url: string; title: string }
+  | null
 
 const nodeTypes = { bookmark: BookmarkNode, reddit: RedditNode }
 
 const CARD_W = 300
 const CARD_H = 340
-const COL_GAP = 80
+const COL_GAP = 60
 const ROW_GAP = 60
-const COLS = 5
+const COLS = 8
 
 type AnyItem = Bookmark | RedditSave
 
-function buildNodes(items: AnyItem[]): Node[] {
+function buildNodes(
+  items: AnyItem[],
+  onClickComments: (post: RedditSave) => void,
+  onClickArticle: (url: string, title: string) => void
+): Node[] {
   return items.map((item, i) => {
     const col = i % COLS
     const row = Math.floor(i / COLS)
@@ -46,7 +57,9 @@ function buildNodes(items: AnyItem[]): Node[] {
         x: col * (CARD_W + COL_GAP) + jitterX,
         y: row * (CARD_H + ROW_GAP) + jitterY,
       },
-      data: isReddit ? { save: item } : { bookmark: item },
+      data: isReddit
+        ? { save: item, onClickComments, onClickArticle }
+        : { bookmark: item, onClickArticle },
       draggable: true,
     }
   })
@@ -54,7 +67,8 @@ function buildNodes(items: AnyItem[]): Node[] {
 
 function Canvas({
   items, twitterCount, redditCount,
-  onSync, syncing, filter, onFilterChange, redditConnected,
+  onSync, syncing, filter, onFilterChange, redditConnected, onManageReddit,
+  onClickComments, onClickArticle,
 }: {
   items: AnyItem[]
   twitterCount: number
@@ -64,13 +78,16 @@ function Canvas({
   filter: SourceFilter
   onFilterChange: (f: SourceFilter) => void
   redditConnected: boolean
+  onManageReddit: () => void
+  onClickComments: (post: RedditSave) => void
+  onClickArticle: (url: string, title: string) => void
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
   const [edges, , onEdgesChange] = useEdgesState([])
 
   useEffect(() => {
-    setNodes(items.length > 0 ? buildNodes(items) : [])
-  }, [items, setNodes])
+    setNodes(items.length > 0 ? buildNodes(items, onClickComments, onClickArticle) : [])
+  }, [items, setNodes, onClickComments, onClickArticle])
 
   return (
     <div className="w-full h-full relative">
@@ -92,8 +109,8 @@ function Canvas({
           ))}
         </div>
 
-        {/* Connect Reddit CTA if not connected */}
-        {!redditConnected && (
+        {/* Reddit button — connect or manage */}
+        {!redditConnected ? (
           <a
             href="/api/reddit/connect"
             className="flex items-center gap-1.5 bg-orange-500 text-white text-xs font-medium px-3 py-2 rounded-xl hover:bg-orange-600 transition-colors shadow-sm"
@@ -104,6 +121,17 @@ function Canvas({
             </svg>
             Connect Reddit
           </a>
+        ) : (
+          <button
+            onClick={onManageReddit}
+            className="flex items-center gap-1.5 bg-orange-50 text-orange-600 border border-orange-200 text-xs font-medium px-3 py-2 rounded-xl hover:bg-orange-100 transition-colors shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="#FF4500">
+              <circle cx="10" cy="10" r="10" fill="#FF4500" fillOpacity="0.15"/>
+              <path d="M16.67 10a1.46 1.46 0 0 0-2.47-1 7.12 7.12 0 0 0-3.85-1.23l.65-3.08 2.13.45a1 1 0 1 0 1-.97 1 1 0 0 0-.96.68l-2.38-.5a.16.16 0 0 0-.19.12l-.73 3.44a7.14 7.14 0 0 0-3.89 1.22 1.46 1.46 0 1 0-1.61 2.39 2.87 2.87 0 0 0 0 .44c0 2.24 2.61 4.06 5.83 4.06s5.83-1.82 5.83-4.06a2.87 2.87 0 0 0 0-.44 1.46 1.46 0 0 0 .64-1.52zM7.27 11a1 1 0 1 1 1 1 1 1 0 0 1-1-1zm5.58 2.71a3.58 3.58 0 0 1-2.85.86 3.58 3.58 0 0 1-2.85-.86.19.19 0 0 1 .27-.27 3.21 3.21 0 0 0 2.58.71 3.21 3.21 0 0 0 2.58-.71.19.19 0 0 1 .27.27zm-.17-1.71a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="#FF4500"/>
+            </svg>
+            Manage Reddit
+          </button>
         )}
 
         <button
@@ -137,9 +165,8 @@ function Canvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 0.8 }}
-        minZoom={0.1}
+        defaultViewport={{ x: 60, y: 60, zoom: 0.55 }}
+        minZoom={0.05}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
@@ -157,23 +184,39 @@ function Canvas({
 
 export function BookmarkCanvas() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
-  const [redditSaves, setRedditSaves] = useState<RedditSave[]>([])
+  const [redditPosts, setRedditPosts] = useState<RedditSave[]>([])
   const [redditConnected, setRedditConnected] = useState(false)
+  const [showRedditSetup, setShowRedditSetup] = useState(false)
+  const [showManageReddit, setShowManageReddit] = useState(false)
+  const [upvotesPrivate, setUpvotesPrivate] = useState(false)
   const [filter, setFilter] = useState<SourceFilter>("all")
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [panel, setPanel] = useState<PanelState>(null)
+
+  const loadRedditFeed = useCallback(async (prefs: RedditPreferences) => {
+    if (prefs.subreddits.length === 0 && !prefs.includeUpvoted) return
+    try {
+      const res = await fetch("/api/reddit/feed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prefs),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRedditPosts(data.posts ?? [])
+        setUpvotesPrivate(data.upvotesPrivate ?? false)
+      }
+    } catch {}
+  }, [])
 
   const loadAll = useCallback(async () => {
     try {
       setSyncing(true)
       setError(null)
 
-      const [xRes, redditRes] = await Promise.all([
-        fetch("/api/bookmarks"),
-        fetch("/api/reddit/saved"),
-      ])
-
+      const xRes = await fetch("/api/bookmarks")
       if (!xRes.ok) {
         const d = await xRes.json()
         throw new Error(d.error ?? "Failed to load bookmarks")
@@ -181,15 +224,17 @@ export function BookmarkCanvas() {
       const xData = await xRes.json()
       setBookmarks(xData.bookmarks)
 
+      const redditRes = await fetch("/api/reddit/saved")
       if (redditRes.status === 401) {
-        const d = await redditRes.json()
-        if (d.connected === false) {
-          setRedditConnected(false)
-        }
+        setRedditConnected(false)
       } else if (redditRes.ok) {
-        const rData = await redditRes.json()
-        setRedditSaves(rData.saves)
         setRedditConnected(true)
+        const prefs = loadRedditPrefs()
+        if (prefs) {
+          await loadRedditFeed(prefs)
+        } else {
+          setShowRedditSetup(true)
+        }
       }
     } catch (err: any) {
       setError(err.message)
@@ -197,9 +242,21 @@ export function BookmarkCanvas() {
       setLoading(false)
       setSyncing(false)
     }
+  }, [loadRedditFeed])
+
+  const handleRedditSetupDone = useCallback(async (prefs: RedditPreferences) => {
+    setShowRedditSetup(false)
+    await loadRedditFeed(prefs)
+  }, [loadRedditFeed])
+
+  const handleClickComments = useCallback((post: RedditSave) => {
+    setPanel({ type: "comments", post })
   }, [])
 
-  // Handle redirect params after Reddit OAuth
+  const handleClickArticle = useCallback((url: string, title: string) => {
+    setPanel({ type: "article", url, title })
+  }, [])
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get("reddit") === "connected") {
@@ -209,10 +266,10 @@ export function BookmarkCanvas() {
   }, [loadAll])
 
   const filteredItems: AnyItem[] = filter === "all"
-    ? [...bookmarks, ...redditSaves]
+    ? [...bookmarks, ...redditPosts]
     : filter === "twitter"
     ? bookmarks
-    : redditSaves
+    : redditPosts
 
   if (loading) {
     return (
@@ -239,16 +296,48 @@ export function BookmarkCanvas() {
 
   return (
     <ReactFlowProvider>
-      <Canvas
-        items={filteredItems}
-        twitterCount={bookmarks.length}
-        redditCount={redditSaves.length}
-        onSync={loadAll}
-        syncing={syncing}
-        filter={filter}
-        onFilterChange={setFilter}
-        redditConnected={redditConnected}
-      />
+      <div className="relative w-full h-full">
+        <Canvas
+          items={filteredItems}
+          twitterCount={bookmarks.length}
+          redditCount={redditPosts.length}
+          onSync={loadAll}
+          syncing={syncing}
+          filter={filter}
+          onFilterChange={setFilter}
+          redditConnected={redditConnected}
+          onManageReddit={() => setShowManageReddit(true)}
+          onClickComments={handleClickComments}
+          onClickArticle={handleClickArticle}
+        />
+
+        {/* Side panels */}
+        {panel?.type === "comments" && (
+          <CommentsPanel post={panel.post} onClose={() => setPanel(null)} />
+        )}
+        {panel?.type === "article" && (
+          <ArticlePanel url={panel.url} title={panel.title} onClose={() => setPanel(null)} />
+        )}
+
+        {(showRedditSetup || showManageReddit) && redditConnected && (
+          <RedditSetup
+            onDone={(prefs) => {
+              setShowRedditSetup(false)
+              setShowManageReddit(false)
+              handleRedditSetupDone(prefs)
+            }}
+            onClose={() => setShowManageReddit(false)}
+            isEditing={showManageReddit}
+          />
+        )}
+
+        {upvotesPrivate && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-orange-50 border border-orange-200 text-orange-700 text-xs px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2">
+            <span>⚠️ Upvote history is private on Reddit.</span>
+            <a href="https://www.reddit.com/settings/privacy" target="_blank" rel="noopener noreferrer" className="underline font-medium">Enable it here →</a>
+          </div>
+        )}
+      </div>
     </ReactFlowProvider>
   )
 }

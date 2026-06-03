@@ -14,8 +14,8 @@ export async function GET() {
   }
 
   try {
-    const bookmarks = await fetchAllBookmarks(session.accessToken, session.twitterId)
-    return NextResponse.json({ bookmarks, count: bookmarks.length })
+    const { bookmarks, pages, apiTotal } = await fetchAllBookmarks(session.accessToken, session.twitterId)
+    return NextResponse.json({ bookmarks, count: bookmarks.length, debug: { pages, apiTotal } })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

@@ -3,7 +3,11 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import type { RedditSave } from "@/lib/reddit"
 
-type RedditNodeData = { save: RedditSave }
+type RedditNodeData = {
+  save: RedditSave
+  onClickComments?: (post: RedditSave) => void
+  onClickArticle?: (url: string, title: string) => void
+}
 
 function formatScore(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
@@ -11,18 +15,26 @@ function formatScore(n: number): string {
 }
 
 export function RedditNode({ data }: NodeProps) {
-  const { save } = data as RedditNodeData
+  const { save, onClickComments, onClickArticle } = data as RedditNodeData
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (save.is_self) {
+      onClickComments?.(save)
+    } else if (onClickArticle) {
+      onClickArticle(save.url, save.title)
+    } else {
+      onClickComments?.(save)
+    }
+  }
 
   return (
     <>
       <Handle type="target" position={Position.Top} className="opacity-0" />
 
-      <a
-        href={save.permalink}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block w-[300px] bg-white rounded-2xl shadow-md border border-orange-100 overflow-hidden cursor-pointer hover:shadow-xl hover:border-orange-200 transition-all group"
-        onClick={(e) => e.stopPropagation()}
+      <div
+        className="relative w-[300px] bg-white rounded-2xl shadow-md border border-orange-100 overflow-hidden cursor-pointer hover:shadow-xl hover:border-orange-200 transition-all group"
+        onClick={handleClick}
       >
         {/* Preview image */}
         {save.previewImage && (
@@ -36,7 +48,7 @@ export function RedditNode({ data }: NodeProps) {
         )}
 
         <div className="p-4">
-          {/* Subreddit + Reddit icon */}
+          {/* Subreddit + external link */}
           <div className="flex items-center gap-2 mb-2">
             <div className="w-5 h-5 shrink-0">
               <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -46,6 +58,18 @@ export function RedditNode({ data }: NodeProps) {
             </div>
             <span className="text-xs font-semibold text-orange-500">r/{save.subreddit}</span>
             <span className="text-xs text-gray-300 ml-auto">u/{save.author}</span>
+            <a
+              href={save.permalink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-gray-300 hover:text-gray-600 transition-colors ml-1"
+              title="Open on Reddit"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </a>
           </div>
 
           {/* Title */}
@@ -67,16 +91,19 @@ export function RedditNode({ data }: NodeProps) {
             </p>
           )}
 
-          {/* Score */}
+          {/* Score + comments hint */}
           <div className="flex items-center gap-1 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
             <svg className="w-3 h-3 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
             </svg>
             <span className="text-orange-500 font-medium">{formatScore(save.score)}</span>
             <span className="ml-1">upvotes</span>
+            <span className="ml-auto text-[10px] text-gray-300">
+              {save.is_self ? "click for comments" : "click to read"}
+            </span>
           </div>
         </div>
-      </a>
+      </div>
 
       <Handle type="source" position={Position.Bottom} className="opacity-0" />
     </>
