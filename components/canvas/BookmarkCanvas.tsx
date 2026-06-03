@@ -37,14 +37,6 @@ const COLS = 8
 
 type AnyItem = Bookmark | RedditSave
 
-// Deterministic jitter from item id — so positions stay stable across filter changes
-function stableHash(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(31, h) + s.charCodeAt(i) | 0
-  }
-  return h >>> 0 // unsigned
-}
 
 function buildNodes(
   items: AnyItem[],
@@ -54,9 +46,8 @@ function buildNodes(
   return items.map((item, i) => {
     const col = i % COLS
     const row = Math.floor(i / COLS)
-    const h = stableHash(item.id)
-    const jitterX = ((h & 0xFF) / 255 - 0.5) * 60
-    const jitterY = (((h >> 8) & 0xFF) / 255 - 0.5) * 40
+    const jitterX = 0
+    const jitterY = 0
 
     const isReddit = (item as RedditSave).source === "reddit"
 
