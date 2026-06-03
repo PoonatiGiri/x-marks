@@ -305,7 +305,7 @@ export function BookmarkCanvas() {
     } catch {}
   }, [])
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (justConnectedReddit = false) => {
     try {
       setSyncing(true)
       setError(null)
@@ -326,9 +326,12 @@ export function BookmarkCanvas() {
         const prefs = loadRedditPrefs()
         if (prefs) {
           await loadRedditFeed(prefs)
-        } else {
+        } else if (justConnectedReddit) {
+          // Only auto-open setup the moment they finish Reddit OAuth
           setShowRedditSetup(true)
         }
+        // If Reddit is connected but no prefs and not a fresh OAuth,
+        // just show the "Manage Reddit" button — let user initiate when ready
       }
     } catch (err: any) {
       setError(err.message)
@@ -353,10 +356,11 @@ export function BookmarkCanvas() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get("reddit") === "connected") {
+    const justConnectedReddit = params.get("reddit") === "connected"
+    if (justConnectedReddit) {
       window.history.replaceState({}, "", "/canvas")
     }
-    loadAll()
+    loadAll(justConnectedReddit)
   }, [loadAll])
 
   const sourceItems: AnyItem[] = filter === "all"
@@ -387,7 +391,7 @@ export function BookmarkCanvas() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <p className="text-sm text-red-500">{error}</p>
-        <button onClick={loadAll} className="text-sm text-gray-600 underline underline-offset-2">
+        <button onClick={() => loadAll()} className="text-sm text-gray-600 underline underline-offset-2">
           Try again
         </button>
       </div>
@@ -401,7 +405,7 @@ export function BookmarkCanvas() {
           items={filteredItems}
           twitterCount={bookmarks.length}
           redditCount={redditPosts.length}
-          onSync={loadAll}
+          onSync={() => loadAll()}
           syncing={syncing}
           filter={filter}
           onFilterChange={setFilter}
