@@ -7,6 +7,8 @@ import {
 } from "@/lib/reddit"
 import { getRedditSession, setRedditSession } from "@/lib/reddit-session"
 
+const DB_AVAILABLE = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -43,6 +45,21 @@ export async function POST(req: NextRequest) {
       seen.add(p.id)
       return true
     })
+
+    // Persist to DB if available
+    if (DB_AVAILABLE && deduped.length > 0) {
+      try {
+        const { getUserIdByTwitterId, upsertRedditSaves, setSyncState } = await import("@/lib/db")
+        const userId = await getUserIdByTwitterId(session.twitterId)
+        if (userId) {
+          await upsertRedditSaves(userId, deduped)
+          await setSyncState(userId, { reddit_last_synced_at: new Date().toISOString() })
+        }
+      } catch (dbErr) {
+        // Non-fatal: log but don't fail the request
+        console.error("[DB] Failed to persist Reddit saves:", dbErr)
+      }
+    }
 
     return NextResponse.json({
       posts: deduped,

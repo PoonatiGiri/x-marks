@@ -1,6 +1,17 @@
 import NextAuth from "next-auth"
 import Twitter from "next-auth/providers/twitter"
 
+const DB_AVAILABLE = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+
+async function getAdapter() {
+  if (!DB_AVAILABLE) return undefined
+  const { SupabaseAdapter } = await import("@auth/supabase-adapter")
+  return SupabaseAdapter({
+    url: process.env.SUPABASE_URL!,
+    secret: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  })
+}
+
 async function refreshAccessToken(token: any) {
   try {
     const credentials = Buffer.from(
@@ -35,7 +46,14 @@ async function refreshAccessToken(token: any) {
   }
 }
 
+const adapter = await getAdapter()
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter,
+  // Always use JWT strategy so X access token stays in the session.
+  // The adapter creates user/account records in Supabase on sign-in so
+  // API routes can map twitterId → Supabase user UUID via getUserIdByTwitterId().
+  session: { strategy: "jwt" },
   providers: [
     Twitter({
       clientId: process.env.TWITTER_CLIENT_ID!,
@@ -60,12 +78,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
-      // Token still valid
       if (Date.now() < token.expiresAt * 1000) {
         return token
       }
 
-      // Token expired — refresh
       return refreshAccessToken(token)
     },
     async session({ session, token }) {
