@@ -26,7 +26,7 @@ const CARDS: CardItem[] = [
 
 function XCard({ card }: { card: Extract<CardItem, { type: "x" }> }) {
   return (
-    <div className="w-[260px] shrink-0 bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+    <div className="w-[210px] shrink-0 bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
       <div className="flex items-center gap-2.5 mb-3">
         <div className="w-8 h-8 rounded-full bg-gray-200 shrink-0 flex items-center justify-center text-xs font-bold text-gray-500">
           {card.author[0]}
@@ -50,7 +50,7 @@ function XCard({ card }: { card: Extract<CardItem, { type: "x" }> }) {
 
 function RedditCard({ card }: { card: Extract<CardItem, { type: "reddit" }> }) {
   return (
-    <div className="w-[260px] shrink-0 bg-white rounded-2xl border border-orange-200 shadow-sm p-4">
+    <div className="w-[210px] shrink-0 bg-white rounded-2xl border border-orange-200 shadow-sm p-4">
       <div className="flex items-center gap-1.5 mb-2.5">
         <div className="w-4 h-4 shrink-0">
           <svg viewBox="0 0 20 20" fill="none">
@@ -106,6 +106,16 @@ export function MarqueeBackground() {
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none select-none" aria-hidden>
+      <style>{`
+        @keyframes marquee {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
+        }
+        @keyframes marquee-reverse {
+          from { transform: translateX(-50%); }
+          to   { transform: translateX(0); }
+        }
+      `}</style>
       {/* Faint tinted backdrop so white cards are visible */}
       <div className="absolute inset-0 bg-slate-50" />
 
@@ -120,7 +130,7 @@ export function MarqueeBackground() {
       </div>
 
       {/* White centre keeps CTA fully readable; fades out at edges to reveal cards */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_75%_65%_at_50%_50%,rgba(255,255,255,1)_62%,rgba(255,255,255,0.85)_76%,rgba(255,255,255,0.15)_92%,rgba(255,255,255,0)_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_82%_72%_at_50%_50%,rgba(255,255,255,1)_48%,rgba(255,255,255,0.93)_63%,rgba(255,255,255,0.38)_80%,rgba(255,255,255,0)_96%)]" />
       <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-white to-transparent" />
       <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-white to-transparent" />
     </div>

@@ -155,15 +155,23 @@ export async function setSyncState(userId: string, state: Partial<SyncState>): P
 
 // ── User lookup ───────────────────────────────────────────────
 
-// Get Supabase user ID from Twitter provider account ID
-export async function getUserIdByTwitterId(twitterId: string): Promise<string | null> {
+// Get Supabase user ID from any provider account ID
+export async function getUserIdByProvider(
+  provider: "twitter" | "reddit",
+  providerAccountId: string
+): Promise<string | null> {
   const { data, error } = await getSupabase()
     .from("accounts")
     .select("userId")
-    .eq("provider", "twitter")
-    .eq("providerAccountId", twitterId)
-    .single()
+    .eq("provider", provider)
+    .eq("providerAccountId", providerAccountId)
+    .maybeSingle()
 
-  if (error && error.code !== "PGRST116") throw new Error(`DB get user: ${error.message}`)
+  if (error) throw new Error(`DB get user: ${error.message}`)
   return data?.userId ?? null
+}
+
+// Backwards-compat alias used in existing bookmarks route
+export async function getUserIdByTwitterId(twitterId: string): Promise<string | null> {
+  return getUserIdByProvider("twitter", twitterId)
 }

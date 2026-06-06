@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getRedditSession, setRedditSession } from "@/lib/reddit-session"
-import { refreshRedditTokens } from "@/lib/reddit"
+import { auth } from "@/lib/auth"
 
 const USER_AGENT = "web:x-marks:1.0 (by /u/x-marks-app)"
 
@@ -38,28 +37,21 @@ export async function POST(req: NextRequest) {
   const { permalink } = await req.json()
   if (!permalink) return NextResponse.json({ error: "Missing permalink" }, { status: 400 })
 
-  let tokens = await getRedditSession()
-  if (!tokens) return NextResponse.json({ error: "Not connected to Reddit" }, { status: 401 })
-
-  // Auto-refresh token
-  if (Date.now() / 1000 > tokens.expires_at - 60) {
-    try {
-      const refreshed = await refreshRedditTokens(tokens.refresh_token)
-      tokens = { ...tokens, ...refreshed }
-      await setRedditSession(tokens)
-    } catch {
-      return NextResponse.json({ error: "Token expired" }, { status: 401 })
-    }
+  const session = await auth()
+  if (!session?.redditAccessToken) {
+    return NextResponse.json({ error: "Not connected to Reddit" }, { status: 401 })
   }
 
-  // Strip domain if full URL, get just the path
-  const path = permalink.replace(/^https?:\/\/(www\.)?reddit\.com/, "").replace(/\/?$/, "")
+  // Strip domain if full URL
+  const path = permalink
+    .replace(/^https?:\/\/(www\.)?reddit\.com/, "")
+    .replace(/\/?$/, "")
 
   const res = await fetch(
     `https://oauth.reddit.com${path}.json?limit=50&depth=4&sort=top`,
     {
       headers: {
-        Authorization: `bearer ${tokens.access_token}`,
+        Authorization: `bearer ${session.redditAccessToken}`,
         "User-Agent": USER_AGENT,
       },
     }

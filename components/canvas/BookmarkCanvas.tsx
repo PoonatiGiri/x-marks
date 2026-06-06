@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { signIn } from "next-auth/react"
 import {
   ReactFlow,
   Background,
@@ -90,7 +91,8 @@ function searchItems(items: AnyItem[], query: string): AnyItem[] {
 
 function Canvas({
   items, twitterCount, redditCount,
-  onSync, syncing, filter, onFilterChange, redditConnected, onManageReddit,
+  onSync, syncing, filter, onFilterChange,
+  xConnected, redditConnected, onManageReddit,
   onClickComments, onClickArticle,
   searchQuery, onSearchChange,
 }: {
@@ -101,6 +103,7 @@ function Canvas({
   syncing: boolean
   filter: SourceFilter
   onFilterChange: (f: SourceFilter) => void
+  xConnected: boolean
   redditConnected: boolean
   onManageReddit: () => void
   onClickComments: (post: RedditSave) => void
@@ -174,10 +177,23 @@ function Canvas({
           ))}
         </div>
 
+        {/* Connect X — shown when signed in via Reddit only */}
+        {!xConnected && (
+          <button
+            onClick={() => signIn("twitter", { callbackUrl: "/canvas" })}
+            className="flex items-center gap-1.5 bg-black text-white text-xs font-medium px-3 py-2 rounded-xl hover:bg-gray-800 transition-colors shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+            Connect X
+          </button>
+        )}
+
         {/* Reddit button — connect or manage */}
         {!redditConnected ? (
-          <a
-            href="/api/reddit/connect"
+          <button
+            onClick={() => signIn("reddit", { callbackUrl: "/canvas" })}
             className="flex items-center gap-1.5 bg-orange-500 text-white text-xs font-medium px-3 py-2 rounded-xl hover:bg-orange-600 transition-colors shadow-sm"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="white">
@@ -185,7 +201,7 @@ function Canvas({
               <path d="M16.67 10a1.46 1.46 0 0 0-2.47-1 7.12 7.12 0 0 0-3.85-1.23l.65-3.08 2.13.45a1 1 0 1 0 1-.97 1 1 0 0 0-.96.68l-2.38-.5a.16.16 0 0 0-.19.12l-.73 3.44a7.14 7.14 0 0 0-3.89 1.22 1.46 1.46 0 1 0-1.61 2.39 2.87 2.87 0 0 0 0 .44c0 2.24 2.61 4.06 5.83 4.06s5.83-1.82 5.83-4.06a2.87 2.87 0 0 0 0-.44 1.46 1.46 0 0 0 .64-1.52zM7.27 11a1 1 0 1 1 1 1 1 1 0 0 1-1-1zm5.58 2.71a3.58 3.58 0 0 1-2.85.86 3.58 3.58 0 0 1-2.85-.86.19.19 0 0 1 .27-.27 3.21 3.21 0 0 0 2.58.71 3.21 3.21 0 0 0 2.58-.71.19.19 0 0 1 .27.27zm-.17-1.71a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="white"/>
             </svg>
             Connect Reddit
-          </a>
+          </button>
         ) : (
           <button
             onClick={onManageReddit}
@@ -254,10 +270,19 @@ function Canvas({
   )
 }
 
-export function BookmarkCanvas() {
+export function BookmarkCanvas({
+  xConnected,
+  redditConnected: initialRedditConnected,
+  redditLinkedStatus,
+}: {
+  providers: ("twitter" | "reddit")[]
+  xConnected: boolean
+  redditConnected: boolean
+  redditLinkedStatus?: string
+}) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [redditPosts, setRedditPosts] = useState<RedditSave[]>([])
-  const [redditConnected, setRedditConnected] = useState(false)
+  const [redditConnected, setRedditConnected] = useState(initialRedditConnected)
   const [showRedditSetup, setShowRedditSetup] = useState(false)
   const [showManageReddit, setShowManageReddit] = useState(false)
   const [upvotesPrivate, setUpvotesPrivate] = useState(false)
@@ -301,28 +326,32 @@ export function BookmarkCanvas() {
       setSyncing(true)
       setError(null)
 
-      const xRes = await fetch("/api/bookmarks")
-      if (!xRes.ok) {
-        const d = await xRes.json()
-        throw new Error(d.error ?? "Failed to load bookmarks")
-      }
-      const xData = await xRes.json()
-      setBookmarks(xData.bookmarks)
-
-      const redditRes = await fetch("/api/reddit/saved")
-      if (redditRes.status === 401) {
-        setRedditConnected(false)
-      } else if (redditRes.ok) {
-        setRedditConnected(true)
-        const prefs = loadRedditPrefs()
-        if (prefs) {
-          await loadRedditFeed(prefs)
-        } else if (justConnectedReddit) {
-          // Only auto-open setup the moment they finish Reddit OAuth
-          setShowRedditSetup(true)
+      // Only fetch X bookmarks if X is connected in the session
+      if (xConnected) {
+        const xRes = await fetch("/api/bookmarks")
+        if (!xRes.ok) {
+          const d = await xRes.json()
+          throw new Error(d.error ?? "Failed to load bookmarks")
         }
-        // If Reddit is connected but no prefs and not a fresh OAuth,
-        // just show the "Manage Reddit" button — let user initiate when ready
+        const xData = await xRes.json()
+        setBookmarks(xData.bookmarks)
+      }
+
+      // Reddit: check session connection status (prop) first, then load feed
+      if (initialRedditConnected || justConnectedReddit) {
+        const redditRes = await fetch("/api/reddit/saved")
+        if (redditRes.status === 401) {
+          setRedditConnected(false)
+        } else if (redditRes.ok) {
+          setRedditConnected(true)
+          const prefs = loadRedditPrefs()
+          if (prefs) {
+            await loadRedditFeed(prefs)
+          } else if (justConnectedReddit) {
+            // Auto-open setup the moment they finish Reddit OAuth
+            setShowRedditSetup(true)
+          }
+        }
       }
     } catch (err: any) {
       setError(err.message)
@@ -330,7 +359,7 @@ export function BookmarkCanvas() {
       setLoading(false)
       setSyncing(false)
     }
-  }, [loadRedditFeed])
+  }, [xConnected, initialRedditConnected, loadRedditFeed])
 
   const handleRedditSetupDone = useCallback(async (prefs: RedditPreferences) => {
     setShowRedditSetup(false)
@@ -346,13 +375,14 @@ export function BookmarkCanvas() {
   }, [])
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const justConnectedReddit = params.get("reddit") === "connected"
+    // redditLinkedStatus comes from the server (URL search param passed via canvas page)
+    const justConnectedReddit = redditLinkedStatus === "connected"
     if (justConnectedReddit) {
+      // Clean the URL param without a full navigation
       window.history.replaceState({}, "", "/canvas")
     }
     loadAll(justConnectedReddit)
-  }, [loadAll])
+  }, [loadAll, redditLinkedStatus])
 
   const sourceItems: AnyItem[] = filter === "all"
     ? [...bookmarks, ...redditPosts]
@@ -400,6 +430,7 @@ export function BookmarkCanvas() {
           syncing={syncing}
           filter={filter}
           onFilterChange={setFilter}
+          xConnected={xConnected}
           redditConnected={redditConnected}
           onManageReddit={() => setShowManageReddit(true)}
           onClickComments={handleClickComments}

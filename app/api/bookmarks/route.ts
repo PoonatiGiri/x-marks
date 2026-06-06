@@ -7,21 +7,22 @@ const DB_AVAILABLE = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE
 export async function GET() {
   const session = await auth()
 
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  // X bookmarks require X to be connected
+  if (!session?.xAccessToken || !session.twitterId) {
+    return NextResponse.json({ error: "X not connected", xConnected: false }, { status: 401 })
   }
 
   if (session.error === "RefreshAccessTokenError") {
     return NextResponse.json({ error: "Token refresh failed — please sign in again" }, { status: 401 })
   }
 
+  const xAccessToken = session.xAccessToken
+  const twitterId = session.twitterId
+
   // ── Without Supabase: full fetch every time (original behaviour) ─────────
   if (!DB_AVAILABLE) {
     try {
-      const { bookmarks, pages, apiTotal } = await fetchAllBookmarks(
-        session.accessToken,
-        session.twitterId
-      )
+      const { bookmarks, pages, apiTotal } = await fetchAllBookmarks(xAccessToken, twitterId)
       return NextResponse.json({ bookmarks, count: bookmarks.length, debug: { pages, apiTotal, mode: "full" } })
     } catch (err: any) {
       return NextResponse.json({ error: err.message }, { status: 500 })
@@ -32,22 +33,18 @@ export async function GET() {
   const { getUserIdByTwitterId, getStoredBookmarks, getStoredBookmarkIds, upsertBookmarks, setSyncState } = await import("@/lib/db")
 
   try {
-    const userId = await getUserIdByTwitterId(session.twitterId)
+    const userId = await getUserIdByTwitterId(twitterId)
 
     // If no DB user yet (first login before adapter creates the record), fall back to full fetch
     if (!userId) {
-      const { bookmarks, pages, apiTotal } = await fetchAllBookmarks(session.accessToken, session.twitterId)
+      const { bookmarks, pages, apiTotal } = await fetchAllBookmarks(xAccessToken, twitterId)
       return NextResponse.json({ bookmarks, count: bookmarks.length, debug: { pages, apiTotal, mode: "full_no_user" } })
     }
 
     // Load stored IDs to determine what's new
     const storedIds = await getStoredBookmarkIds(userId)
 
-    const { newBookmarks, reachedExisting } = await fetchNewBookmarks(
-      session.accessToken,
-      session.twitterId,
-      storedIds
-    )
+    const { newBookmarks, reachedExisting } = await fetchNewBookmarks(xAccessToken, twitterId, storedIds)
 
     // Persist new bookmarks
     if (newBookmarks.length > 0) {

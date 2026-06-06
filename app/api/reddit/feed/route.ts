@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
-import {
-  fetchSubredditTopPosts,
-  fetchUpvotedPosts,
-  refreshRedditTokens,
-} from "@/lib/reddit"
-import { getRedditSession, setRedditSession } from "@/lib/reddit-session"
+import { fetchSubredditTopPosts, fetchUpvotedPosts } from "@/lib/reddit"
 
 const DB_AVAILABLE = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
 
@@ -13,16 +8,11 @@ export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const reddit = await getRedditSession()
-  if (!reddit) return NextResponse.json({ error: "Reddit not connected" }, { status: 401 })
-
-  let { access_token, refresh_token, expires_at, username } = reddit
-
-  if (Date.now() / 1000 > expires_at - 60) {
-    const refreshed = await refreshRedditTokens(refresh_token)
-    access_token = refreshed.access_token!
-    await setRedditSession({ access_token, refresh_token: refreshed.refresh_token ?? refresh_token, expires_at: refreshed.expires_at!, username })
+  if (!session.redditAccessToken || !session.redditUsername) {
+    return NextResponse.json({ error: "Reddit not connected" }, { status: 401 })
   }
+
+  const { redditAccessToken, redditUsername } = session
 
   const body = await req.json()
   const subreddits: string[] = body.subreddits ?? []
@@ -31,8 +21,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const [subredditResults, upvoteResult] = await Promise.all([
-      Promise.all(subreddits.map((s) => fetchSubredditTopPosts(access_token, s, timeframe))),
-      includeUpvoted ? fetchUpvotedPosts(access_token, username) : Promise.resolve({ posts: [], isPrivate: false }),
+      Promise.all(subreddits.map((s) => fetchSubredditTopPosts(redditAccessToken, s, timeframe))),
+      includeUpvoted
+        ? fetchUpvotedPosts(redditAccessToken, redditUsername)
+        : Promise.resolve({ posts: [], isPrivate: false }),
     ])
 
     const subredditPosts = subredditResults.flat()
@@ -46,17 +38,18 @@ export async function POST(req: NextRequest) {
       return true
     })
 
-    // Persist to DB if available
+    // Persist to DB if available — use whichever provider ID we have
     if (DB_AVAILABLE && deduped.length > 0) {
       try {
-        const { getUserIdByTwitterId, upsertRedditSaves, setSyncState } = await import("@/lib/db")
-        const userId = await getUserIdByTwitterId(session.twitterId)
+        const { getUserIdByProvider, upsertRedditSaves, setSyncState } = await import("@/lib/db")
+        const provider = session.twitterId ? "twitter" : "reddit"
+        const providerAccountId = session.twitterId ?? session.redditId!
+        const userId = await getUserIdByProvider(provider, providerAccountId)
         if (userId) {
           await upsertRedditSaves(userId, deduped)
           await setSyncState(userId, { reddit_last_synced_at: new Date().toISOString() })
         }
       } catch (dbErr) {
-        // Non-fatal: log but don't fail the request
         console.error("[DB] Failed to persist Reddit saves:", dbErr)
       }
     }
@@ -69,7 +62,7 @@ export async function POST(req: NextRequest) {
         subredditsRequested: subreddits,
         subredditPostsFound: subredditPosts.length,
         upvotedPostsFound: upvoteResult.posts.length,
-      }
+      },
     })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
