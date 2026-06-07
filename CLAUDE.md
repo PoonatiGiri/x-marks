@@ -54,6 +54,7 @@ vs competitors: X charges $8/month just for folders. X-marks gives canvas + cros
 - **Marquee animation fix** — `@keyframes` injected via `<style>` tag in the component (Tailwind v4 strips unreferenced keyframes from the CSS bundle).
 - **Card sizing** — 210px width confirmed in screenshots
 - **Radial gradient** — cards visible around edges, CTA readable, confirmed in screenshots
+- **Canvas background picker (Session 6)** — picker UI confirmed in browser by the user (strip-bug and padding fixed after debugging). The picker renders correctly; the actual surface-change on the canvas was verified at build/source level (not personally seen rendered, but the React Flow `style` path is confirmed against library source). Build-clean: `next build` passes with zero lint errors.
 
 ### ⚠️ Code complete but NOT yet verified end-to-end
 All of the following were built and type-check cleanly, but were never confirmed working in a real browser flow:
@@ -133,6 +134,7 @@ components/
     RedditSetup.tsx         Subreddit selector modal (first setup + manage)
     CommentsPanel.tsx       Slide-in panel — Reddit comments with collapsible threads
     ArticlePanel.tsx        Slide-in panel — extracted article content (prose rendering)
+    BackgroundPicker.tsx    Canvas background picker — palette button (top-right toolbar) + popover. 26 backgrounds in 5 groups (Pattern/Solid/Artistic/Abstract/Photo). Persists to localStorage. Layout-critical styles are INLINE (see Tailwind v4 gotcha).
   landing/
     MarqueeBackground.tsx   Animated inclined card rows. Injects @keyframes via <style> tag (Tailwind v4 strips unused keyframes).
   providers.tsx             SessionProvider wrapper (wraps entire app — enables client-side signIn())
@@ -195,6 +197,16 @@ DELETED:
 - Card positions: deterministic grid, no random offset
 - Nodes keyed by bookmark/post ID — React Flow deduplicates
 
+### Canvas Background Picker (Session 6)
+- **Component:** `components/canvas/BackgroundPicker.tsx`. Palette button is the rightmost item in the canvas toolbar (top-right corner).
+- **State** lives in the inner `Canvas` component: `useState<CanvasBackground>(() => loadBackgroundPref())`. Safe from SSR/hydration mismatch because `Canvas` only renders after the `loading` gate in `BookmarkCanvas` (always true on first client render).
+- **26 backgrounds in 5 groups:** Pattern (Dots/Grid/Cross — React Flow `<Background>` overlay), Solid (flat colours incl. 2 dark), Artistic (CSS gradients), Abstract (pure-CSS mesh/conic/stripes/polka/blueprint), Photo (6 remote images).
+- **How it's applied:** `<ReactFlow style={{ background: bg.surface }}>`. The `<Background>` pattern overlay renders ONLY for the Pattern group (`bg.pattern` present). MiniMap `maskColor` flips dark when `bg.dark`.
+- **Why it renders (verified against @xyflow/react@12.11.0 source):** `.react-flow` stylesheet sets `background-color: var(--xy-background-color, transparent)` — default transparent — so the inline `background` shorthand wins. `.react-flow__background` is also transparent, so the pattern overlays the surface instead of hiding it.
+- **Persistence:** `localStorage` key `xmarks_canvas_bg` (stores the background `id`).
+- **Photo backgrounds use REMOTE Picsum placeholders** (`https://picsum.photos/id/<id>/...`) behind a 55% white scrim for card legibility. ⚠️ Swap for bundled/licensed assets in `/public` before charging users — hotlinking a third party is fragile and has licensing implications. Abstract/gradient backgrounds have no such concern (pure CSS, no network).
+- **All layout-/state-critical styles are INLINE** (grid container, popover width/height/padding, swatch size, selection ring outline) — see Tailwind v4 gotcha below. Only decorative classes (hover zoom, label spacing) remain class-based.
+
 ### Search
 - Client-side live filter on `filteredItems` (memoized)
 - Searches: tweet text, author name, author username; Reddit title, subreddit, author, body
@@ -210,6 +222,11 @@ DELETED:
 - `@keyframes` defined in `globals.css` are NOT included in the compiled CSS bundle by Tailwind v4 unless they're referenced by a utility class
 - Animations referenced only via inline `style` props are stripped → animation runs (browser sees the name) but nothing moves
 - Fix: inject keyframes via a `<style>` JSX element directly in the component that uses them
+
+**Single-use utility classes can also be dropped (Session 6 — confirmed, not just keyframes).** When the background picker first shipped, its swatch grid rendered as a single vertical strip. Root cause: classes used in **only one file** (`grid`, `grid-cols-6`, `w-64`, `shadow-lg`, the `ring-*` selection classes) were not emitted into the served CSS by the running dev server — `display:grid` count was literally 0 in the bundle. Without `display:grid`, `grid-template-columns` did nothing and the `w-full` swatches stacked; without `w-64` the popover collapsed to content width and squeezed the columns.
+- **Diagnosis technique:** `grep -rIlF "<class>" app components | grep -v <thisfile>` — if a layout-critical class is used in 0 other files, it's at risk. Then grep the served CSS chunk (`/_next/static/chunks/...css`) for the actual rule.
+- **Fix that works every time:** put layout-/state-critical CSS in **inline `style`** objects (immune to Tailwind's content scanning), not utility classes. Reserve utility classes for styles that are either common in the repo or purely decorative (a miss is invisible).
+- This is the same failure family as the keyframes issue — Tailwind v4 + Turbopack can omit utilities that aren't seen broadly enough during the running build.
 
 ---
 
@@ -410,7 +427,7 @@ SUPABASE_SERVICE_ROLE_KEY= # eyJ... (Settings > API > service_role key)
 - Reddit setup modal fix, Reddit errors surfaced, Reddit on landing page
 - Landing page marquee background
 
-### Session 5 — Landing Page Polish + Equal-Hierarchy OAuth (current)
+### Session 5 — Landing Page Polish + Equal-Hierarchy OAuth
 - **Marquee animation fix** — keyframes injected inline (Tailwind v4 bundle stripping)
 - **Card sizing** — reduced from 260px to 210px
 - **Radial gradient tuning** — cards visible around edges, center stays readable
@@ -430,6 +447,17 @@ SUPABASE_SERVICE_ROLE_KEY= # eyJ... (Settings > API > service_role key)
 - **Connection status badges** in header
 - **Deleted:** `/api/reddit/connect`, `/api/reddit/callback`, `lib/reddit-session.ts`
 - **Added:** `getUserIdByProvider()` in `db.ts` (provider-agnostic user lookup)
+
+### Session 6 — Commit/Push + Canvas Background Picker
+- **Committed & pushed all of Session 5's previously-uncommitted work** (equal-hierarchy OAuth, `/link`, `/settings`, deleted Reddit cookie routes). Commit `4627167`.
+- **Canvas Background Picker** (commit `7e469f1`) — new `BackgroundPicker.tsx` + wiring in `BookmarkCanvas.tsx`. 26 backgrounds, 5 groups, top-right palette button, localStorage persistence. See "Canvas Background Picker" under Key Technical Decisions for details.
+  - Debugged a "vertical strip" rendering bug → root cause was Tailwind v4 dropping single-use utility classes (`grid`, `grid-cols-6`, `w-64`, etc.). Fix: inlined all layout-critical styles. This reinforced and extended the Tailwind v4 gotcha (now documented for classes, not just keyframes).
+  - Verified: `tsc --noEmit` exit 0, `next build` clean (zero lint errors), React Flow `style` path confirmed against `@xyflow/react@12.11.0` source.
+- **Deployment groundwork (explored, not executed):**
+  - Vercel CLI v52 installed and logged in as `poonatigiri28-3341`. Project **NOT linked** yet (`vercel link` + `vercel --prod` would deploy).
+  - Git push from this environment works (HTTPS remote authenticated).
+  - **Blocker for a *working* deploy:** OAuth is host-locked to `localhost:3001` via `NEXTAUTH_URL` + the registered callback URLs. Any non-localhost host (vercel.app, LAN IP, tunnel) breaks sign-in until (a) `NEXTAUTH_URL` is set to the new host AND (b) the new `…/api/auth/callback/{twitter,reddit}` URLs are registered at developer.x.com and reddit.com/prefs/apps. Those two console edits cannot be done from the CLI.
+  - **Mobile access:** landing/UI viewable on mobile via LAN IP (`192.168.0.4:3001`, same Wi-Fi) or a `cloudflared` tunnel (installed via brew; quick tunnels are temporary + random URL and die on Mac sleep). OAuth login does NOT work over either — same host-lock reason. Stable mobile login = Vercel deploy.
 
 ---
 
@@ -477,8 +505,9 @@ SUPABASE_SERVICE_ROLE_KEY= # eyJ... (Settings > API > service_role key)
 | 6hr auto-sync (Vercel cron) | Needs Supabase + incremental sync active | After Supabase |
 | Weekly digest email | Needs Supabase for user data | After Supabase |
 | AI semantic search | Needs content stored in DB | After Supabase + content preservation |
-| Vercel deployment | No paying users yet | Before first paying user |
+| Vercel deployment | No paying users yet | Before first paying user. Note: Vercel CLI already installed + logged in; needs `vercel link`, env vars, and OAuth callback URL updates (see Session 6 milestone). |
 | Account merge UI (complex duplicate case) | DB needed; at small scale, manual merge in Supabase | After Supabase active |
+| Swap photo backgrounds → bundled/licensed assets | Photo backgrounds currently hotlink remote Picsum placeholders | Before charging users (licensing + reliability) |
 
 ---
 
