@@ -10,12 +10,12 @@ import {
   useNodesState,
   useEdgesState,
   type Node,
-  BackgroundVariant,
   ReactFlowProvider,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { BookmarkNode } from "./BookmarkNode"
 import { RedditNode } from "./RedditNode"
+import { BackgroundPicker, loadBackgroundPref, type CanvasBackground } from "./BackgroundPicker"
 import { RedditSetup, loadRedditPrefs, type RedditPreferences } from "./RedditSetup"
 import { CommentsPanel } from "./CommentsPanel"
 import { ArticlePanel } from "./ArticlePanel"
@@ -113,6 +113,7 @@ function Canvas({
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
   const [edges, , onEdgesChange] = useEdgesState([])
+  const [background, setBackground] = useState<CanvasBackground>(() => loadBackgroundPref())
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -238,6 +239,9 @@ function Canvas({
             </>
           )}
         </button>
+
+        {/* Background picker — top right */}
+        <BackgroundPicker value={background} onChange={setBackground} />
       </div>
 
       {/* Empty search result */}
@@ -257,12 +261,20 @@ function Canvas({
         minZoom={0.05}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
+        style={{ background: background.surface }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#e5e7eb" />
+        {background.pattern && (
+          <Background
+            variant={background.pattern.variant}
+            gap={background.pattern.gap}
+            size={background.pattern.size}
+            color={background.pattern.color}
+          />
+        )}
         <Controls className="shadow-sm" />
         <MiniMap
           nodeColor={(n) => n.type === "reddit" ? "#fff7ed" : "#f3f4f6"}
-          maskColor="rgba(255,255,255,0.7)"
+          maskColor={background.dark ? "rgba(15,23,42,0.6)" : "rgba(255,255,255,0.7)"}
           className="shadow-sm rounded-xl overflow-hidden"
         />
       </ReactFlow>
