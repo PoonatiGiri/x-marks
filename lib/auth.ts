@@ -84,6 +84,35 @@ async function refreshRedditToken(token: JWT): Promise<JWT> {
   }
 }
 
+// ── Session cookie decode helper ─────────────────────────────────────────────
+// NextAuth names the cookie differently in dev vs prod:
+//   dev  (HTTP):  authjs.session-token            → salt = "authjs.session-token"
+//   prod (HTTPS): __Secure-authjs.session-token   → salt = "__Secure-authjs.session-token"
+// We must decode with the salt that matches the cookie we actually found,
+// otherwise decode() returns null and the other provider's tokens are lost.
+async function decodeSessionCookie(): Promise<Partial<JWT>> {
+  try {
+    const { decode } = await import("next-auth/jwt")
+    const { cookies } = await import("next/headers")
+    const cookieStore = await cookies()
+    const secureName = "__Secure-authjs.session-token"
+    const regularName = "authjs.session-token"
+    const secureRaw = cookieStore.get(secureName)?.value
+    const regularRaw = cookieStore.get(regularName)?.value
+    const raw = secureRaw ?? regularRaw
+    if (!raw) return {}
+    const salt = secureRaw ? secureName : regularName
+    const decoded = await decode({
+      token: raw,
+      secret: process.env.NEXTAUTH_SECRET!,
+      salt,
+    })
+    return decoded ? (decoded as Partial<JWT>) : {}
+  } catch {
+    return {}
+  }
+}
+
 // ── Auth config ──────────────────────────────────────────────────────────────
 
 const adapter = await getAdapter()
@@ -187,29 +216,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       // ── Check if the user is already signed in (in-canvas linking case) ─
       // Read the existing NextAuth JWT cookie to detect an active session.
-      try {
-        const { decode } = await import("next-auth/jwt")
-        const { cookies } = await import("next/headers")
-        const cookieStore = await cookies()
-        const raw =
-          cookieStore.get("authjs.session-token")?.value ??
-          cookieStore.get("__Secure-authjs.session-token")?.value
-
-        if (raw) {
-          const existing = await decode({
-            token: raw,
-            secret: process.env.NEXTAUTH_SECRET!,
-            salt: "authjs.session-token",
-          })
-          if (existing?.sub) {
-            // Active session — treat this as a link, not a new sign-in.
-            // Preserve the existing user ID so the adapter links accounts.
-            user.id = existing.sub
-            return true
-          }
+      {
+        const existing = await decodeSessionCookie()
+        if (existing?.sub) {
+          // Active session — treat this as a link, not a new sign-in.
+          // Preserve the existing user ID so the adapter links accounts.
+          user.id = existing.sub as string
+          return true
         }
-      } catch {
-        // Cookie unreadable — proceed normally
       }
 
       // ── Email-based auto-linking ────────────────────────────────────────
@@ -308,25 +322,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // fallback when DB is not configured.
 
         // ── Source 1: existing session cookie ────────────────────────────────
-        let existing: Partial<JWT> = {}
-        try {
-          const { decode } = await import("next-auth/jwt")
-          const { cookies } = await import("next/headers")
-          const cookieStore = await cookies()
-          const raw =
-            cookieStore.get("authjs.session-token")?.value ??
-            cookieStore.get("__Secure-authjs.session-token")?.value
-          if (raw) {
-            const decoded = await decode({
-              token: raw,
-              secret: process.env.NEXTAUTH_SECRET!,
-              salt: "authjs.session-token",
-            })
-            if (decoded) existing = decoded as Partial<JWT>
-          }
-        } catch {
-          // Cookie unreadable — proceed without
-        }
+        const existing = await decodeSessionCookie()
 
         // ── Source 2: Supabase accounts table ────────────────────────────────
         let dbTokens: Partial<JWT> = {}
